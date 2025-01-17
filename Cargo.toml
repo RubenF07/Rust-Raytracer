@@ -1,0 +1,13 @@
+[package]
+name = "rust_raytracer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+stl_io = "0.8.3"
+image = "0.25.5"
+rand = "0.8.5"
+rayon = "1.10.0"
+winit = "0.30.5"
+pixels = "0.14.0"
+softbuffer = "0.4.6"
