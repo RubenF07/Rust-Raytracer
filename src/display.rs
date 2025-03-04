@@ -4,13 +4,12 @@ use std::fs::File;
 use std::num::NonZero;
 use std::rc::Rc;
 use image::{codecs::png::PngEncoder, ExtendedColorType::Rgb8, ImageEncoder};
-
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::window::{Window, WindowId};
 use std::time::{Duration, Instant};
-use softbuffer::{Buffer, Context, Surface};
+use softbuffer::Surface;
 
 #[derive(Default)]
 struct App {
@@ -18,52 +17,85 @@ struct App {
     last_update: Option<Instant>,
     frame_buffer: Option<Vec<u32>>,
     frame_count: u32,
+    max_frame_count: u32,
+    done_render: bool,
     height: u32,
     width: u32,
+    current_window_size: (u32, u32),
     renderer_params: Option<RedererParams>,
     surface: Option<Surface<Rc<Window>,Rc<Window>>>,
 }
 
 impl App {
-    fn new(render_params: RedererParams) -> Self {
+    fn new(render_params: RedererParams, max_frame_count:u32) -> Self {
+        let width = render_params.scene.camera.width;
+        let height = render_params.scene.camera.height;
         Self {
             window: None,
             last_update: None,
-            frame_buffer: Some(vec![0; (render_params.scene.camera.width * render_params.scene.camera.height * 3) as usize]),
+            frame_buffer: Some(vec![0; (width * height * 3) as usize]),
             frame_count: 0,
-            height: render_params.scene.camera.height,
-            width: render_params.scene.camera.width,
+            max_frame_count: max_frame_count,
+            done_render: false,
+            height,
+            width,
+            current_window_size: (width, height),
             renderer_params: Some(render_params),
             surface: None,
         }
     }
 
+    fn calculate_letterbox_dimensions(&self) -> (u32, u32, u32, u32) {
+        let (window_width, window_height) = self.current_window_size;
+        let source_aspect = self.width as f32 / self.height as f32;
+        let window_aspect = window_width as f32 / window_height as f32;
+        
+        let (scaled_width, scaled_height, offset_x, offset_y) = if window_aspect > source_aspect {
+            // Wider than source - vertical letterboxing
+            let scaled_height = window_height;
+            let scaled_width = (window_height as f32 * source_aspect) as u32;
+            let offset_x = (window_width - scaled_width) / 2;
+            (scaled_width, scaled_height, offset_x, 0)
+        } else {
+            // Taller than source - horizontal letterboxing
+            let scaled_width = window_width;
+            let scaled_height = (window_width as f32 / source_aspect) as u32;
+            let offset_y = (window_height - scaled_height) / 2;
+            (scaled_width, scaled_height, 0, offset_y)
+        };
+        
+        (scaled_width, scaled_height, offset_x, offset_y)
+    }
+
     fn update_and_render(&mut self) {
         let now = Instant::now();
         
-        // Check if we need to update (20 FPS = 50ms between frames)
+        // Max of 20 FPS
         if let Some(last) = self.last_update {
             if now.duration_since(last) < Duration::from_millis(50) {
                 return;
             }
         }
-        // self.renderer_params.as_mut().unwrap().scene.camera.pos.y += 1.0;
         
         // Get new frame data and update the window
         if let (Some(buffer), Some(_window)) = (&mut self.frame_buffer, &self.window) {
             // Get the new frame data
-            
-            let new_buffer = getframe(self.renderer_params.as_ref().expect("Didn't have render details"));
-            for i in 0..buffer.len(){
-                buffer[i] += new_buffer[i] as u32;
+            if self.frame_count < self.max_frame_count{
+                let new_buffer = getframe(self.renderer_params.as_ref().expect("Didn't have render details"));
+                for i in 0..buffer.len(){
+                    buffer[i] += new_buffer[i] as u32;
+                }
+                self.frame_count += 1;
             }
-            self.frame_count += 1;
+            else if self.frame_count == self.max_frame_count && !self.done_render{
+                println!("Done rendering!");
+                self.done_render = true;
+            }
             
             let scalled_buffer: Vec<u8> = buffer.iter().map(|x| (x/self.frame_count) as u8).collect();
-            // let scalled_buffer: Vec<u8> = new_buffer;
 
             // Convert RGB buffer to RGBA pixels (u32)
-            let pixels: Vec<u32> = scalled_buffer.chunks_exact(3)
+            let source_pixels: Vec<u32> = scalled_buffer.chunks_exact(3)
                 .map(|rgb| {
                     let r = rgb[0] as u32;
                     let g = rgb[1] as u32;
@@ -72,10 +104,31 @@ impl App {
                 })
                 .collect();
 
-            // Update the surface
+            let (scaled_width, scaled_height, offset_x, offset_y) = self.calculate_letterbox_dimensions();
             if let Some(surface) = &mut self.surface {
                 let mut buffer = surface.buffer_mut().unwrap();
-                buffer.copy_from_slice(&pixels);
+                let (window_width, window_height) = self.current_window_size;
+                
+                // Fill entire buffer with black first
+                for pixel in buffer.iter_mut() {
+                    *pixel = 0xFF000000;
+                }
+
+                for y in 0..scaled_height {
+                    for x in 0..scaled_width {
+                        let src_x = (x * self.width / scaled_width) as usize;
+                        let src_y = (y * self.height / scaled_height) as usize;
+                        let src_index = src_y * self.width as usize + src_x;
+
+                        let dst_x = x + offset_x;
+                        let dst_y = y + offset_y;
+                        let dst_index = dst_y * window_width + dst_x;
+                        
+                        if dst_index < buffer.len() as u32 && src_index < source_pixels.len() {
+                            buffer[dst_index as usize] = source_pixels[src_index];
+                        }
+                    }
+                }
                 buffer.present().unwrap();
             }
         }
@@ -110,24 +163,25 @@ impl ApplicationHandler for App {
             WindowEvent::RedrawRequested => {
                 if let Some(surface) = &mut self.surface {
                     surface.resize(
-                        NonZero::new(self.width).unwrap(),
-                        NonZero::new(self.height).unwrap(),
+                        NonZero::new(self.current_window_size.0).unwrap(),
+                        NonZero::new(self.current_window_size.1).unwrap(),
                     )
                     .unwrap();
                 }
                 self.update_and_render();
-                // Request next frame
                 self.window.as_ref().unwrap().request_redraw();
             },
             WindowEvent::Resized(size) => {
-                // Update surface if window is resized
+                self.current_window_size = (size.width, size.height);
+                
                 if let Some(surface) = &mut self.surface {
                     surface.resize(
-                        NonZero::new(self.width).unwrap(),
-                        NonZero::new(self.height).unwrap(),
+                        NonZero::new(size.width).unwrap(),
+                        NonZero::new(size.height).unwrap(),
                     )
                     .unwrap();
                 }
+                self.window.as_ref().unwrap().request_redraw();
             },
             _ => (),
         }
@@ -144,13 +198,13 @@ fn getframe(reder_params: &RedererParams) -> Vec<u8>{
 }
 
 
-pub fn start_render(render_params: RedererParams) {
+pub fn start_render(render_params: RedererParams, max_frame_count:u32) {
     let event_loop = EventLoop::new().unwrap();
     
     // Use Poll for smoother animation
     event_loop.set_control_flow(ControlFlow::Poll);
     
-    let mut app = App::new(render_params);
+    let mut app = App::new(render_params,max_frame_count);
     event_loop.run_app(&mut app);
 }
 
