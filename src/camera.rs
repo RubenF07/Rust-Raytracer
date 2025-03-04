@@ -1,33 +1,21 @@
-use crate::point::{Point,cross,dot,normalize};
+use crate::point::{Point,cross,normalize};
 use rand::Rng;
 
 pub struct Camera{
     pub pos:Point,
-    // dir:Point,
-
     pub width:u32,
     pub height:u32,
-    // set in ::new
     aspect_ratio:f32,
 
-    // degrees of x range, converted to tan in ::new
+    // degrees of x range converted to tan
     fov:f32,
 
-    // set in ::new
     up:Point,
     forward:Point,
     right:Point,
 }
 
 impl Camera {
-    // TODO temp
-    pub fn rotate(&mut self, num: f32) {
-        self.forward = normalize(&self.forward.sub(&Point{y:-num,x:0.0,z:0.0}));
-        self.right = normalize(&cross(&self.forward, &Point { x: 0.0, y: 1.0, z: 0.0 }));
-        self.up = normalize(&cross(&self.right, &self.forward));
-    }
-
-
     pub fn new(position:Point,direction:Point,width:u32,height:u32,fov:f32) -> Camera{
         let forward = normalize(&direction);
         let right = normalize(&cross(&forward, &Point { x: 0.0, y: 1.0, z: 0.0 }));
@@ -44,12 +32,6 @@ impl Camera {
         let offset_pixel = get_offset(*pixel, *anti_aliasing_strength);
         let x_ndc = (2.0 * offset_pixel[0] / (self.width - 1) as f32 - 1.0) * self.aspect_ratio;
         let y_ndc = 1.0 - 2.0 * offset_pixel[1] / (self.height - 1) as f32;
-        //? NOTE: When not normalized, distance values are skewed across pixels!
-        // let ray = normalize(&Point {
-        //     x: self.forward.x + (self.right.x * x_ndc + self.up.x * y_ndc) * self.fov,
-        //     y: self.forward.y + (self.right.y * x_ndc + self.up.y * y_ndc) * self.fov,
-        //     z: self.forward.z + (self.right.z * x_ndc + self.up.z * y_ndc) * self.fov
-        // });
         Point {
             x: self.forward.x + (self.right.x * x_ndc + self.up.x * y_ndc) * self.fov,
             y: self.forward.y + (self.right.y * x_ndc + self.up.y * y_ndc) * self.fov,

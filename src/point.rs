@@ -48,13 +48,10 @@ pub fn dot(a: &Point, b: &Point) -> f32 {
     a.x*b.x + a.y*b.y + a.z*b.z
 }
 
-pub fn get_tri_intersect(pos:&Point,dir:&Point,a:&Point,b:&Point,c:&Point) -> Option<f32>{        
-    // TODO look at normal
-
+pub fn get_tri_intersect(pos:&Point,dir:&Point,a:&Point,b:&Point,c:&Point,normal:&Point) -> Option<f32>{        
     // Möller-Trumbore algorithm
     let edge_ab = b.sub(&a);
     let edge_ac = c.sub(&a);
-    let normal = cross(&edge_ab, &edge_ac);
     
     let denom = -dot(&dir,&normal);
 

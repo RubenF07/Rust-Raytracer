@@ -1,10 +1,7 @@
 use rand::Rng;
 use stl_io::{read_stl, IndexedMesh, Vector};
-use std::f32::EPSILON;
 use std::{collections::VecDeque, f32::INFINITY, fs::OpenOptions, vec};
-use crate::point::{cross, get_tri_intersect, Point};
-use crate::RGB;
-use crate::camera::Camera;
+use crate::point::{cross, get_tri_intersect, normalize, Point};
 
 #[derive(Debug)]
 pub struct Tri{
@@ -12,7 +9,8 @@ pub struct Tri{
     pub vertecies: [usize; 3],
     pub normal: Point,
     pub center: Point,
-    pub area: f32
+    pub area: f32,
+    pub determ: Point,
 }
 
 #[derive(Debug)]
@@ -24,6 +22,7 @@ pub struct Mesh{
 
 pub struct BVHHitReturn{
     tri_idx: Option<usize>,
+    tri_dist: Option<f32>,
     bound_checks: u32,
     bounds_checked: Vec<usize>
 }
@@ -51,31 +50,27 @@ pub struct BVHMesh{
     pub tris: Vec<Tri>,
 }
 impl BVHMesh{
-
-    // Called when requesting tri on a confirmed bvh hit
-    // returns (tri center, tri normal)
-
-    // // TODO DEBUG
-    // pub fn get_final_tri_hit(&self, pos:&Point, dir: &Point) -> Option<(&Point,&Point)>{
-    pub fn get_final_tri_hit(&self, pos:&Point, dir: &Point) -> Option<(&Point,&Point,u32)>{
+    // returns (tri dist, tri normal)
+    pub fn get_final_tri_hit(&self, pos:&Point, dir: &Point) -> Option<(f32,&Point)>{
         let tri: BVHHitReturn = self.get_tri_in_bvh(&dir, &pos, 0);
 
         if tri.tri_idx.is_some(){
-            return Some((&self.tris[tri.tri_idx.unwrap()].center, &self.tris[tri.tri_idx.unwrap()].normal, tri.bound_checks));
+            return Some((tri.tri_dist.unwrap(), &self.tris[tri.tri_idx.unwrap()].normal));
         }
-        // return Some((&self.tris[0].center, &Point{x:0.0,y:0.0,z:0.0},tri.bound_checks));
-    
+        
+        // No hit
         None
     }
 
-    fn get_leaf_bound_tri_hit(&self, ray:&Point, origin: &Point, bound: &Bound) -> Option<usize>{
+    // return (tri_idx, dist)
+    fn get_leaf_bound_tri_hit(&self, ray:&Point, origin: &Point, bound: &Bound) -> (Option<usize>,Option<f32>){
         let mut best_dist = f32::INFINITY;
         let mut best_tri_idx = 0;
 
         for tri_idx in &bound.tris{
             let tri: &Tri = &self.tris[*tri_idx];
 
-            let hit = get_tri_intersect(&origin ,&ray, &self.vertecies[tri.vertecies[0]], &self.vertecies[tri.vertecies[1]], &self.vertecies[tri.vertecies[2]]);
+            let hit = get_tri_intersect(&origin ,&ray, &self.vertecies[tri.vertecies[0]], &self.vertecies[tri.vertecies[1]], &self.vertecies[tri.vertecies[2]],&tri.determ);
             if hit.is_some_and(|x| x < best_dist && x > 0.0){
                 best_dist = hit.unwrap();
                 best_tri_idx = *tri_idx;
@@ -83,21 +78,21 @@ impl BVHMesh{
         }
 
         return if best_dist != f32::INFINITY{
-            Some(best_tri_idx)
+            (Some(best_tri_idx),Some(best_dist))
         } else {
-            None
+            (None,None)
         };
     }
 
-    // Private function to get the hit tris in bvh
     fn get_tri_in_bvh(&self,ray: &Point, origin: &Point, bound_idx: usize) -> BVHHitReturn{
         let bound: &Bound = &self.bounds[bound_idx];
         if bound.children.len() == 0{
             // Leaf Node
-            return BVHHitReturn{tri_idx: self.get_leaf_bound_tri_hit(&ray, &origin, bound), bound_checks:0, bounds_checked:vec![bound_idx]};
+            let tri_info = self.get_leaf_bound_tri_hit(&ray, &origin, bound);
+            return BVHHitReturn{tri_idx: tri_info.0, tri_dist: tri_info.1, bound_checks:0, bounds_checked:vec![bound_idx]};
         }
 
-        // TODO bounds should only have 0 or 2 children
+        // Bounds should only have 0 or 2 children
         if bound.children.len() == 1{
             println!("ERROR: Bound with 1 child");
             return self.get_tri_in_bvh(&ray, &origin, bound.children[0]);
@@ -111,49 +106,51 @@ impl BVHMesh{
 
         // Both hit
         if first_hit.is_some() && second_hit.is_some(){
-            let closer_bound_idx = if first_hit.unwrap() < second_hit.unwrap(){bound.children[0]} else {bound.children[1]};
-            let farther_bound_idx = if first_hit.unwrap() < second_hit.unwrap(){bound.children[1]} else {bound.children[0]};
+            let (closer_bound_idx,farther_bound_idx,farther_dist) = 
+                if first_hit.unwrap() < second_hit.unwrap(){
+                    (bound.children[0],bound.children[1],second_hit.unwrap())
+                } else {
+                    (bound.children[1],bound.children[0],first_hit.unwrap())
+                };
 
-            let first_hit = self.get_tri_in_bvh(&ray, &origin, closer_bound_idx);
-            child_bounds_checked.extend(first_hit.bounds_checked);
-            child_checks += first_hit.bound_checks;
+            let closer_hit = self.get_tri_in_bvh(&ray, &origin, closer_bound_idx);
+            child_bounds_checked.extend(closer_hit.bounds_checked);
+            child_checks += closer_hit.bound_checks;
 
-            if first_hit.tri_idx.is_some(){
-                return BVHHitReturn{tri_idx: first_hit.tri_idx, bound_checks:child_checks, bounds_checked: child_bounds_checked};
+            if closer_hit.tri_idx.is_some() && closer_hit.tri_dist.unwrap() < farther_dist{
+                return BVHHitReturn{tri_idx: closer_hit.tri_idx, tri_dist:closer_hit.tri_dist, bound_checks:child_checks, bounds_checked: child_bounds_checked};
             }
-
-            let second_hit = self.get_tri_in_bvh(&ray, &origin, farther_bound_idx);
-            child_bounds_checked.extend(second_hit.bounds_checked);
-            child_checks += second_hit.bound_checks;
             
-            if second_hit.tri_idx.is_some(){
-                return BVHHitReturn{tri_idx: second_hit.tri_idx, bound_checks:child_checks, bounds_checked: child_bounds_checked};
+            let farther_hit = self.get_tri_in_bvh(&ray, &origin, farther_bound_idx);
+            child_bounds_checked.extend(farther_hit.bounds_checked);
+            child_checks += farther_hit.bound_checks;
+            
+            if farther_hit.tri_idx.is_some(){
+                if closer_hit.tri_idx.is_some() && farther_hit.tri_dist.unwrap() > closer_hit.tri_dist.unwrap(){
+                    return BVHHitReturn{tri_idx: closer_hit.tri_idx, tri_dist:closer_hit.tri_dist, bound_checks:child_checks, bounds_checked: child_bounds_checked};
+                }
+                return BVHHitReturn{tri_idx: farther_hit.tri_idx, tri_dist:farther_hit.tri_dist, bound_checks:child_checks, bounds_checked: child_bounds_checked};
             }
-            return BVHHitReturn{tri_idx: None, bound_checks:child_checks, bounds_checked: child_bounds_checked};
+            else if closer_hit.tri_idx.is_some() {
+                return BVHHitReturn{tri_idx: closer_hit.tri_idx, tri_dist:closer_hit.tri_dist, bound_checks:child_checks, bounds_checked: child_bounds_checked};
+            }
+
+            return BVHHitReturn{tri_idx: None, tri_dist:None, bound_checks:child_checks, bounds_checked: child_bounds_checked};
         }
         
         // Only one hit
-        if first_hit.is_some(){
-            let first_hit = self.get_tri_in_bvh(&ray, &origin, bound.children[0]);
-                child_bounds_checked.extend(first_hit.bounds_checked);
-                child_checks += first_hit.bound_checks;
+        if first_hit.is_some() || second_hit.is_some(){
+            let only_hit = if first_hit.is_some() {self.get_tri_in_bvh(&ray, &origin, bound.children[0])} else {self.get_tri_in_bvh(&ray, &origin, bound.children[1])};
+                child_bounds_checked.extend(only_hit.bounds_checked);
+                child_checks += only_hit.bound_checks;
                 
-                if first_hit.tri_idx.is_some(){
-                    return BVHHitReturn{tri_idx: first_hit.tri_idx, bound_checks:child_checks, bounds_checked: child_bounds_checked};
+                if only_hit.tri_idx.is_some(){
+                    return BVHHitReturn{tri_idx: only_hit.tri_idx, tri_dist:only_hit.tri_dist, bound_checks:child_checks, bounds_checked: child_bounds_checked};
                 }
-            }
-        if second_hit.is_some(){
-            let second_hit = self.get_tri_in_bvh(&ray, &origin, bound.children[1]);
-            child_bounds_checked.extend(second_hit.bounds_checked);
-            child_checks += second_hit.bound_checks;
-
-            if second_hit.tri_idx.is_some(){
-                return BVHHitReturn{tri_idx: second_hit.tri_idx, bound_checks:child_checks, bounds_checked: child_bounds_checked};
-            }
         }
 
         // None hit or all returned empty
-        return BVHHitReturn{tri_idx: None, bound_checks:child_checks, bounds_checked: child_bounds_checked};
+        return BVHHitReturn{tri_idx: None, tri_dist:None, bound_checks:child_checks, bounds_checked: child_bounds_checked};
     
     }
 
@@ -226,8 +223,6 @@ pub fn stl_to_mesh(file_name:&str, center: Point, scale: f32) -> Mesh {
     // Parse Mesh
     let mut vertecies: Vec<Point> = vec![];
     for vertex in stl.vertices{
-        // vertecies.push(Point{x: vertex[0]*scale,y: vertex[1]*scale,z: vertex[2]*scale}.add(&offset));
-        // vertecies.push(Point{x: vertex[0]*scale,y: vertex[2]*scale,z: vertex[1]*scale}.add(&offset));
         vertecies.push(Point{x: vertex[0]*scale,y: vertex[2]*scale,z: -vertex[1]*scale}.add(&offset));
         // println!("({},{},{})",vertecies[vertecies.len()-1].x,vertecies[vertecies.len()-1].y,vertecies[vertecies.len()-1].z);
     }
@@ -235,11 +230,12 @@ pub fn stl_to_mesh(file_name:&str, center: Point, scale: f32) -> Mesh {
     let mut tris: Vec<Tri> = vec![];
     for tri in stl.faces{
         let center: Point = calc_tri_center( &vertecies[tri.vertices[0]],&vertecies[tri.vertices[1]],&vertecies[tri.vertices[2]]);
-        tris.push(Tri{vertecies: tri.vertices, normal:Point{x:tri.normal[0],y:tri.normal[2],z:tri.normal[1]}, center:center, area: calc_tri_area(&tri.vertices,&vertecies)});
+
+        let edge_ab = vertecies[tri.vertices[1]].sub(&vertecies[tri.vertices[0]]);
+        let edge_ac = vertecies[tri.vertices[2]].sub(&vertecies[tri.vertices[0]]);
         
-        
-        // let normal = normalize(&cross(&vertecies[tri.vertices[2]].sub(&vertecies[tri.vertices[0]]), &vertecies[tri.vertices[1]].sub(&vertecies[tri.vertices[0]])));
-        // tris.push(Tri{vertecies: tri.vertices, normal:normal, center:center, area: calc_tri_area(&tri.vertices,&vertecies)});
+        let normal = normalize(&cross(&vertecies[tri.vertices[1]].sub(&vertecies[tri.vertices[0]]), &vertecies[tri.vertices[2]].sub(&vertecies[tri.vertices[0]])));
+        tris.push(Tri{vertecies: tri.vertices, normal:normal, center:center, area: calc_tri_area(&tri.vertices,&vertecies), determ: cross(&edge_ab, &edge_ac)});
     }
 
     println!("Parsed mesh, Tris: {}", tris.len());
@@ -258,7 +254,6 @@ fn calc_tri_area(vertex_idxs: &[usize;3], vetex_list: &Vec<Point>) -> f32{
     ).len() * 0.5
 }
 
-// pub fn stl_to_bvh(file_name:&str,min_tri:usize, center: Point, scale: f32) -> BVHMesh {
 pub fn stl_to_bvh(file_name:&str,max_depth:usize, center: Point, scale: f32) -> BVHMesh {
     let stl = stl_to_mesh(file_name, center, scale);
     
@@ -273,13 +268,11 @@ pub fn stl_to_bvh(file_name:&str,max_depth:usize, center: Point, scale: f32) -> 
         let popped_bound = bvhq.pop_front().expect("Error poping from queue");
         let bound: Bound;
         
-        
         if popped_bound.is_none(){
             continue;
         }
         
         bound = popped_bound.unwrap();
-        // println!("Parent: {}",bound.parent_index);
         bounds.push(bound.clone());
         
         // adds children to parent
@@ -287,61 +280,50 @@ pub fn stl_to_bvh(file_name:&str,max_depth:usize, center: Point, scale: f32) -> 
         if bounds.len() != 1{
             bounds[bound.parent_index].children.push(cur_i);
         }
-        // println!("Post Push Parent: {:?}",bounds[bound.parent_index]);
 
-        // // last bound in brach if mithin tri max
-        // if bound.tris.len() <= min_tri{
-        //     // println!("Max Tris in Bound");
-        //     continue;
-        // }
         if bound.depth >= max_depth || bound.tris.len() == 1{
             leaf_bounds += 1;
             leaf_tris += bound.tris.len();
-            // println!("Leaf Bound with {} Tris",bound.tris.len());
             continue;
         }
 
-        
         // Surface Area Heuristic
         let mut best_div_axis: u8 = 3;
         let mut best_div_pos: f32 = 0.0;
         let mut best_div_cost: f32 = f32::INFINITY;
-        
-        // Debug
-        let mut best_div_tri: usize = 0;
 
         let mut ran_gen = rand::thread_rng();
         // check tris per axis
         for axis in 0..3{
-            // 15 rand tri
-            for _tri_test in 0..15{
-                let tri_idx = bound.tris[ran_gen.gen_range(0..bound.tris.len())];
-                let tri = &stl.tris[tri_idx];
-
-
-                let pos = match axis {
-                    0 => tri.center.x,
-                    1 => tri.center.y,
-                    _ => tri.center.z,
+            // 10 rand tri, 1 check of splix axis
+            for tri_test in 0..11{
+                let pos = if tri_test == 0 {
+                    // First check split axis
+                    match axis {
+                        0 => (bound.x[1]+bound.x[0])*0.5,
+                        1 => (bound.y[1]+bound.y[0])*0.5,
+                        _ => (bound.z[1]+bound.z[0])*0.5,
+                    }
+                }
+                else{
+                    let tri_idx = bound.tris[ran_gen.gen_range(0..bound.tris.len())];
+                    let tri = &stl.tris[tri_idx];
+                    match axis {
+                        0 => tri.center.x,
+                        1 => tri.center.y,
+                        _ => tri.center.z,
+                    }
                 };
-
+                
                 let cost = calc_bvh_cost(&bound, &stl.tris, axis, pos);
 
                 if cost < best_div_cost{
                     best_div_axis = axis;
                     best_div_pos = pos;
                     best_div_cost = cost;
-
-                    // Debug
-                    best_div_tri = tri_idx;
                 }
             }
         }
-        // println!("best cost at axis:{}, at pos:{}, with cost:{}",best_div_axis,best_div_pos,best_div_cost);
-
-        // println!("{:?} --- {:?}",x1,x2);
-        // println!("{:?} --- {:?}",y1,y2);
-        // println!("{:?} --- {:?}\n",z1,z2);
         
         // adds children to queue
         let b1 = make_bound(
@@ -365,24 +347,18 @@ pub fn stl_to_bvh(file_name:&str,max_depth:usize, center: Point, scale: f32) -> 
             bound.depth + 1
         );
 
-        
-        // println!("Child 1 {:?}",b1);
-        // println!("Child 2 {:?}",b2);
         bvhq.push_back(b1);
         bvhq.push_back(b2);
-
     }
                 
     println!("Leaf bounds: {}    Leaf Tris: {}",leaf_bounds,leaf_tris);
-    println!("Created BVH with {} bounds \nAverage of {} tris per leaf bound", bounds.len(), leaf_tris as f32/leaf_bounds as f32);
+    println!("Created BVH with {} bounds \nAverage of {} tris per leaf bound", bounds.len(), (leaf_tris as f32 * 100.0/leaf_bounds as f32).round() * 0.01);
     BVHMesh { bounds: bounds, vertecies: stl.vertecies, tris: stl.tris }
 }
 
 
 
 fn make_bound(tri_list:&Vec<Tri>,tri_indecies:&Vec<usize>,vertex_list:&Vec<Point>,parent_index:usize,div_axis:u8,div_pos:f32,left_side:bool,depth:usize) -> Option<Bound>{
-    // println!("Tri Count: {}",tri_list.len());
-    // println!("Old Bounds: x-bounds: {:?},y-bounds: {:?},z-bounds: {:?}",x_bounds,y_bounds,z_bounds);
     let mut min_x: f32 = INFINITY;
     let mut min_y: f32 = INFINITY;
     let mut min_z: f32 = INFINITY;
@@ -432,17 +408,13 @@ fn make_bound(tri_list:&Vec<Tri>,tri_indecies:&Vec<usize>,vertex_list:&Vec<Point
     if new_tris.len() == 0{
         return None;
     }
-    // println!("New Bound Tris: {}",new_tris.len());
     
-    // println!("New Bounds: x-bounds: {:?},y-bounds: {:?},z-bounds: {:?}",[min_x,max_x],[min_y,max_y],[min_z,max_z]);
     let ret = Some(Bound { parent_index:parent_index, tris: new_tris, x: [min_x,max_x], y: [min_y,max_y], z: [min_z,max_z], children:vec![], depth});
-    // println!("Calculated Bound: {:?}",ret);
     return ret;
 }
 
 
 fn calc_bvh_cost(bound: &Bound, tri_list:&Vec<Tri>, div_axis:u8, div_pos:f32) -> f32{
-
     let mut left_count:u32 = 0;
     let mut right_count:u32 = 0;
     let mut left_area:f32 = 0.0;   

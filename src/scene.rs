@@ -1,5 +1,5 @@
 use crate::camera::Camera;
-use crate::material::Material;
+use crate::material::{Material, MaterialData};
 use crate::mesh::{stl_to_bvh, BVHMesh};
 use crate::point::{dot, normalize, Point};
 use crate::RGB;
@@ -23,6 +23,7 @@ impl Scene{
     pub fn get_color(&self, pos: &Point, ray_dir: &Point, depth: usize) -> Option<RGB> {
         // TODO use single mesh hit check
         if depth > self.max_ray_depth{
+            // println!("Max depth reached");
             return Some(RGB::default());
         }
 
@@ -81,10 +82,15 @@ impl Hittable for MeshObject{
         self.bvh.get_bound_hit_dist(&ray_dir, &pos,0)
     }
     fn get_color(&self, pos: &Point, ray_dir: &Point, scene: &Scene, depth: usize) -> Option<RGB> {
-        // // TODO TEST DEBUG
-        if let Some(pos_normal) = self.bvh.get_final_tri_hit(pos,ray_dir){
-            return Some(self.material.get_color(&pos_normal.0, &ray_dir,&pos_normal.1,scene,depth))
-            // return Some(self.material.get_color(&pos_normal.0, &ray_dir,&Point { x: pos_normal.2 as f32, y: 0.0, z: 0.0 },scene,depth))
+        if let Some(dist_normal) = self.bvh.get_final_tri_hit(pos,ray_dir){
+            return Some(self.material.get_color(
+                MaterialData::new(
+                    &pos.add(&ray_dir.at_time(dist_normal.0)), 
+                    &ray_dir,
+                    &dist_normal.1,
+                    scene,
+                    depth)
+            ))   
         }
         None
     }
@@ -121,8 +127,14 @@ impl Hittable for Sphere{
         None
     }
     fn get_color(&self, pos: &Point, ray_dir: &Point, scene: &Scene, depth: usize) -> Option<RGB> {
-        // let n = ray_dir.at_time(self.hit_dist(pos, ray_dir).unwrap()).add(&pos).sub(&self.center).at_time(1.0/self.radius);
         let n = normalize(&ray_dir.at_time(self.hit_dist(pos, ray_dir).unwrap()).add(&pos).sub(&self.center));
-        Some(self.material.get_color(&ray_dir.at_time(self.hit_dist(pos, ray_dir).unwrap()).add(&pos), &ray_dir,&n,scene,depth))
+        Some(self.material.get_color(
+            MaterialData::new(
+                &ray_dir.at_time(self.hit_dist(pos, ray_dir).unwrap()).add(&pos), 
+                &ray_dir,
+                &n,
+                scene,
+                depth
+        )))
     }
 }
