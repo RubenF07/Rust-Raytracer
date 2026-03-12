@@ -36,7 +36,7 @@ pub fn render(params: &RedererParams) -> Vec<u8>{
 
 
     let end = Instant::elapsed(&start).as_secs_f32();
-    println!("Frame rendered in {} seconds, same as {} fps",end,1.0/end);
+    println!("Frame rendered in {} seconds, {} fps",end,1.0/end);
 
 
     pixel_arr

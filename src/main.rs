@@ -3,7 +3,7 @@ use std::time::Instant;
 use rust_raytracer::camera::Camera;
 use rust_raytracer::RGB;
 use rust_raytracer::display::{start_render,display_image};
-use rust_raytracer::material::{Lambertian, Metal, NormalBased};
+use rust_raytracer::material::{Lambertian, Metal};
 use rust_raytracer::renderer::{render,RedererParams};
 use rust_raytracer::point::Point;
 use rust_raytracer::scene::{MeshObject, Sphere, Scene};
@@ -45,15 +45,12 @@ fn main() {
     scene.add_object(Box::new(Sphere::new(
         Point{x: 80.0,y: 28.0,z: -70.0},
         38.0,
-        // Box::new(Lambertian::new(RGB{r:0,g:255,b:0}))
-        // Box::new(NormalBased{})
         Box::new(Metal::new(0.9, 0.0,RGB{r:0,g:0,b:255}))
     )));
     scene.add_object(Box::new(Sphere::new(
         Point{x: 0.0,y: -2015.0,z: 0.0},
         2000.0,
         Box::new(Lambertian::new(RGB{r:255,g:0,b:0}))
-        // Box::new(Metal::new(0.7,RGB{r:255,g:255,b:0}))
     )));
     
     
@@ -61,43 +58,39 @@ fn main() {
     // scene.add_object(Box::new(MeshObject::new(
     //     &"f1.stl",
     //     12,
-    //     Point { x: -70.0, y: 120.0, z: -10.0 },
-    //     3.0,
+    //     Point { x: 20.0, y: 50.0, z: 10.0 },
+    //     1.0,
     //     Box::new(Lambertian::new(RGB{r:0,g:255,b:0}))
-    //     // Box::new(BVHDebug::new(400))
     // )));
     
-    // 1,022 Tris 50 rays
-    // Frame time: 75.00s
-    // Total time: 75.18s
-
-      
+    // 1,022 Tris
     scene.add_object(Box::new(MeshObject::new(
         &"polydragon.stl",
         11,
         Point { x: 0.0, y: 0.0, z: 30.0 },
         8.0,
-        // Box::new(Metal::new(0.8, 0.0,RGB{r:0,g:0,b:255}))
-        // Box::new(NormalBased{})
         Box::new(Lambertian::new(RGB{r:255,g:255,b:255}))
-        // Box::new(BVHDebug::new(1))
     )));
 
+    // ##############################
+    //  ↓ Use only one render test ↓
+    // ##############################
 
-    
+    // Single render test
     let render_params = RedererParams::new(
         scene,
         30,
         0.15);
     display_image(render_params.scene.camera.width, render_params.scene.camera.height, &render(&render_params));
+    println!("Total render time: {}s",Instant::elapsed(&start).as_secs_f32());
     
-
+    // Constant render test
     // let render_params = RedererParams::new(
     //     scene,
     //     1,
     //     0.2);
-    // start_render(render_params,20);
+    // start_render(render_params,30);
     
-    // println!("Total render time: {}s",Instant::elapsed(&start).as_secs_f32());
+    
     
 }

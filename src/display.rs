@@ -3,6 +3,8 @@ use crate::renderer::{render, RedererParams};
 use std::fs::File;
 use std::num::NonZero;
 use std::rc::Rc;
+use std::sync::{mpsc, Arc};
+use std::thread;
 use image::{codecs::png::PngEncoder, ExtendedColorType::Rgb8, ImageEncoder};
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
@@ -22,17 +24,24 @@ struct App {
     height: u32,
     width: u32,
     current_window_size: (u32, u32),
-    renderer_params: Option<RedererParams>,
+    renderer_params: Option<Arc<RedererParams>>,
     surface: Option<Surface<Rc<Window>,Rc<Window>>>,
+
+    render_sender: Option<mpsc::Sender<Vec<u8>>>,
+    render_receiver: Option<mpsc::Receiver<Vec<u8>>>,
+
+    new_frame: bool,
 }
 
 impl App {
     fn new(render_params: RedererParams, max_frame_count:u32) -> Self {
+        let (render_sender, render_receiver) = mpsc::channel();
+
         let width = render_params.scene.camera.width;
         let height = render_params.scene.camera.height;
         Self {
             window: None,
-            last_update: None,
+            last_update: Some(Instant::now()-Duration::from_millis(1000)),
             frame_buffer: Some(vec![0; (width * height * 3) as usize]),
             frame_count: 0,
             max_frame_count: max_frame_count,
@@ -40,8 +49,13 @@ impl App {
             height,
             width,
             current_window_size: (width, height),
-            renderer_params: Some(render_params),
+            renderer_params: Some(Arc::new(render_params)),
             surface: None,
+
+            render_sender: Some(render_sender),
+            render_receiver: Some(render_receiver),
+
+            new_frame: true,
         }
     }
 
@@ -70,29 +84,39 @@ impl App {
     fn update_and_render(&mut self) {
         let now = Instant::now();
         
-        // Max of 20 FPS
-        if let Some(last) = self.last_update {
-            if now.duration_since(last) < Duration::from_millis(50) {
-                return;
-            }
-        }
-        
         // Get new frame data and update the window
         if let (Some(buffer), Some(_window)) = (&mut self.frame_buffer, &self.window) {
             // Get the new frame data
-            if self.frame_count < self.max_frame_count{
-                let new_buffer = getframe(self.renderer_params.as_ref().expect("Didn't have render details"));
-                for i in 0..buffer.len(){
-                    buffer[i] += new_buffer[i] as u32;
+            // Max of 40 FPS
+            if !self.done_render && now.duration_since(self.last_update.unwrap()) > Duration::from_millis(25) {
+                self.last_update = Some(now);
+
+                if let Some(reciever) = &self.render_receiver{
+                    if let Ok(new_buffer) = reciever.try_recv(){
+                        for i in 0..buffer.len(){
+                            buffer[i] += new_buffer[i] as u32;
+                        }
+                        self.frame_count += 1;
+
+                        if self.frame_count >= self.max_frame_count {
+                            self.done_render = true;
+                            println!("Finished Render with {} frames", self.frame_count);
+                        }
+                        else{
+                            self.new_frame = true;
+                        }
+                        
+                    }
                 }
-                self.frame_count += 1;
-            }
-            else if self.frame_count == self.max_frame_count && !self.done_render{
-                println!("Done rendering!");
-                self.done_render = true;
             }
             
-            let scalled_buffer: Vec<u8> = buffer.iter().map(|x| (x/self.frame_count) as u8).collect();
+            let scalled_buffer: Vec<u8> = if (self.frame_count>0){
+                buffer.iter().map(|x| (x/self.frame_count) as u8).collect()
+            }
+            else{
+                buffer.iter().map(|x| (x/1) as u8).collect()
+            };
+                
 
             // Convert RGB buffer to RGBA pixels (u32)
             let source_pixels: Vec<u32> = scalled_buffer.chunks_exact(3)
@@ -132,8 +156,22 @@ impl App {
                 buffer.present().unwrap();
             }
         }
-        
-        self.last_update = Some(now);
+
+        if (self.new_frame){
+            println!("Rendering Frame");
+            if let Some(sender) = &self.render_sender{
+                if let Some(renderer_params) = &self.renderer_params {
+                    let renderer_params = renderer_params.clone(); // Clone the Rc to move into the thread
+                    let sender = sender.clone(); // Clone the sender to move into the thread
+                    
+                    thread::spawn(move || {
+                        let new_buffer = getframe(renderer_params.as_ref());
+                        sender.send(new_buffer).unwrap();
+                    });
+                    self.new_frame = false;
+                }
+            }
+        }
     }
 }
 
@@ -205,10 +243,8 @@ pub fn start_render(render_params: RedererParams, max_frame_count:u32) {
     event_loop.set_control_flow(ControlFlow::Poll);
     
     let mut app = App::new(render_params,max_frame_count);
-    event_loop.run_app(&mut app);
+    let _ = event_loop.run_app(&mut app).expect("Failed to run display loop");
 }
-
-
 
 
 pub fn display_image(w:u32,h:u32,pixels: &[u8]){

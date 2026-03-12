@@ -5,7 +5,7 @@ use crate::point::{dot, normalize, Point};
 use crate::RGB;
 
 pub struct Scene{
-    objects: Vec<Box<dyn Hittable + Sync>>,
+    objects: Vec<Box<dyn Hittable + Sync + Send>>,
     pub camera: Camera,
     max_ray_depth: usize
 }
@@ -15,7 +15,7 @@ impl Scene{
         Scene { objects: vec![], camera: cam, max_ray_depth: max_ray_depth }
     }
 
-    pub fn add_object(&mut self,obj: Box<dyn Hittable + Sync>){
+    pub fn add_object(&mut self,obj: Box<dyn Hittable + Sync + Send>){
         self.objects.push(obj);
     }
 
@@ -60,7 +60,6 @@ impl Scene{
 
 
 // Objects
-
 pub trait Hittable{
     fn hit_dist(&self, pos: &Point, ray_dir: &Point) -> Option<f32>;
     fn get_color(&self, pos: &Point, ray_dir: &Point, scene: &Scene, depth: usize) -> Option<RGB>;
@@ -68,10 +67,10 @@ pub trait Hittable{
 
 pub struct MeshObject{
     bvh: BVHMesh,
-    material: Box<dyn Material + Sync>
+    material: Box<dyn Material + Sync + Send>
 }
 impl MeshObject{
-    pub fn new(stl_file: &str, max_bound_depth: usize, center: Point,scale: f32, mat: Box<dyn Material + Sync>) -> MeshObject{
+    pub fn new(stl_file: &str, max_bound_depth: usize, center: Point,scale: f32, mat: Box<dyn Material + Sync + Send>) -> MeshObject{
         let bvh = stl_to_bvh(stl_file, max_bound_depth, center, scale);
         MeshObject { bvh: bvh, material: mat }
     }
@@ -99,10 +98,10 @@ impl Hittable for MeshObject{
 pub struct Sphere{
     center: Point,
     radius: f32,
-    material: Box<dyn Material + Sync>
+    material: Box<dyn Material + Sync + Send>
 }
 impl Sphere{
-    pub fn new(center: Point, radius: f32, mat: Box<dyn Material + Sync>) -> Sphere{
+    pub fn new(center: Point, radius: f32, mat: Box<dyn Material + Sync + Send>) -> Sphere{
         Sphere{
             center: center,
             radius: radius,
