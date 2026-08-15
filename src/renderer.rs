@@ -3,14 +3,14 @@ use crate::scene::Scene;
 use std::time::Instant;
 use rayon::prelude::*;
 
-pub struct RedererParams{
+pub struct RendererParams{
     pub scene:Scene, 
     pub samples_per_pixel:u16, 
     pub anti_aliasing_strength:f32
 }
-impl RedererParams{
-    pub fn new(scene: Scene, samples_per_pixel:u16, anti_aliasing_strength:f32) -> RedererParams{
-        RedererParams{
+impl RendererParams{
+    pub fn new(scene: Scene, samples_per_pixel:u16, anti_aliasing_strength:f32) -> RendererParams{
+        RendererParams{
             scene: scene,
             samples_per_pixel: samples_per_pixel,
             anti_aliasing_strength: anti_aliasing_strength
@@ -18,7 +18,7 @@ impl RedererParams{
     }
 }
 
-pub fn render(params: &RedererParams) -> Vec<u8>{
+pub fn render(params: &RendererParams) -> Vec<u8>{
     let scene = &params.scene;
     let camera= &params.scene.camera;
     let samples_per_pixel = params.samples_per_pixel;

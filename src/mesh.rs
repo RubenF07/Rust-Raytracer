@@ -5,8 +5,8 @@ use crate::point::{cross, get_tri_intersect, normalize, Point};
 
 #[derive(Debug)]
 pub struct Tri{
-    // indecies of mesh vertecies
-    pub vertecies: [usize; 3],
+    // indices of mesh vertices
+    pub vertices: [usize; 3],
     pub normal: Point,
     pub center: Point,
     pub area: f32,
@@ -15,7 +15,7 @@ pub struct Tri{
 
 #[derive(Debug)]
 pub struct Mesh{
-    pub vertecies: Vec<Point>,
+    pub vertices: Vec<Point>,
     pub tris: Vec<Tri>
 }
 
@@ -46,7 +46,7 @@ pub struct Bound{
 #[derive(Debug,Default)]
 pub struct BVHMesh{
     pub bounds: Vec<Bound>,
-    pub vertecies: Vec<Point>,
+    pub vertices: Vec<Point>,
     pub tris: Vec<Tri>,
 }
 impl BVHMesh{
@@ -70,7 +70,7 @@ impl BVHMesh{
         for tri_idx in &bound.tris{
             let tri: &Tri = &self.tris[*tri_idx];
 
-            let hit = get_tri_intersect(&origin ,&ray, &self.vertecies[tri.vertecies[0]], &self.vertecies[tri.vertecies[1]], &self.vertecies[tri.vertecies[2]],&tri.determ);
+            let hit = get_tri_intersect(&origin ,&ray, &self.vertices[tri.vertices[0]], &self.vertices[tri.vertices[1]], &self.vertices[tri.vertices[2]],&tri.determ);
             if hit.is_some_and(|x| x < best_dist && x > 0.0){
                 best_dist = hit.unwrap();
                 best_tri_idx = *tri_idx;
@@ -198,17 +198,17 @@ impl BVHMesh{
     }
 }
 
-fn mesh_center(vertecies: &Vec<Vector<f32>>) -> Point{
+fn mesh_center(vertices: &Vec<Vector<f32>>) -> Point{
     let mut net_vertex = Point::default();
-    for vertex in vertecies{
+    for vertex in vertices{
         net_vertex.x += vertex[0];
         net_vertex.y += vertex[1];
         net_vertex.z += vertex[2];
     }
 
-    net_vertex.x /= vertecies.len() as f32;
-    net_vertex.y /= vertecies.len() as f32;
-    net_vertex.z /= vertecies.len() as f32;
+    net_vertex.x /= vertices.len() as f32;
+    net_vertex.y /= vertices.len() as f32;
+    net_vertex.z /= vertices.len() as f32;
     
     net_vertex
 }
@@ -221,36 +221,36 @@ pub fn stl_to_mesh(file_name:&str, center: Point, scale: f32) -> Mesh {
     let offset: Point = center.sub(&mesh_center(&stl.vertices));
 
     // Parse Mesh
-    let mut vertecies: Vec<Point> = vec![];
+    let mut vertices: Vec<Point> = vec![];
     for vertex in stl.vertices{
-        vertecies.push(Point{x: vertex[0]*scale,y: vertex[2]*scale,z: -vertex[1]*scale}.add(&offset));
-        // println!("({},{},{})",vertecies[vertecies.len()-1].x,vertecies[vertecies.len()-1].y,vertecies[vertecies.len()-1].z);
+        vertices.push(Point{x: vertex[0]*scale,y: vertex[2]*scale,z: -vertex[1]*scale}.add(&offset));
+        // println!("({},{},{})",vertices[vertices.len()-1].x,vertices[vertices.len()-1].y,vertices[vertices.len()-1].z);
     }
 
     let mut tris: Vec<Tri> = vec![];
     for tri in stl.faces{
-        let center: Point = calc_tri_center( &vertecies[tri.vertices[0]],&vertecies[tri.vertices[1]],&vertecies[tri.vertices[2]]);
+        let center: Point = calc_tri_center( &vertices[tri.vertices[0]],&vertices[tri.vertices[1]],&vertices[tri.vertices[2]]);
 
-        let edge_ab = vertecies[tri.vertices[1]].sub(&vertecies[tri.vertices[0]]);
-        let edge_ac = vertecies[tri.vertices[2]].sub(&vertecies[tri.vertices[0]]);
+        let edge_ab = vertices[tri.vertices[1]].sub(&vertices[tri.vertices[0]]);
+        let edge_ac = vertices[tri.vertices[2]].sub(&vertices[tri.vertices[0]]);
         
-        let normal = normalize(&cross(&vertecies[tri.vertices[1]].sub(&vertecies[tri.vertices[0]]), &vertecies[tri.vertices[2]].sub(&vertecies[tri.vertices[0]])));
-        tris.push(Tri{vertecies: tri.vertices, normal:normal, center:center, area: calc_tri_area(&tri.vertices,&vertecies), determ: cross(&edge_ab, &edge_ac)});
+        let normal = normalize(&cross(&vertices[tri.vertices[1]].sub(&vertices[tri.vertices[0]]), &vertices[tri.vertices[2]].sub(&vertices[tri.vertices[0]])));
+        tris.push(Tri{vertices: tri.vertices, normal:normal, center:center, area: calc_tri_area(&tri.vertices,&vertices), determ: cross(&edge_ab, &edge_ac)});
     }
 
     println!("Parsed mesh, Tris: {}", tris.len());
-    Mesh{tris:tris,vertecies:vertecies}
+    Mesh{tris:tris,vertices:vertices}
 }
 
 fn calc_tri_center(a:&Point,b:&Point,c:&Point) -> Point{
     Point{x:(a.x+b.x+c.x)/3.0,y:(a.y+b.y+c.y)/3.0,z:(a.z+b.z+c.z)/3.0}
 }
 
-fn calc_tri_area(vertex_idxs: &[usize;3], vetex_list: &Vec<Point>) -> f32{
+fn calc_tri_area(vertex_idxs: &[usize;3], vertex_list: &Vec<Point>) -> f32{
     // Tri Area - https://math.stackexchange.com/questions/128991/how-to-calculate-the-area-of-a-3d-triangle
     cross(
-        &vetex_list[vertex_idxs[1]].sub(&vetex_list[vertex_idxs[0]]),
-        &vetex_list[vertex_idxs[2]].sub(&vetex_list[vertex_idxs[0]])
+        &vertex_list[vertex_idxs[1]].sub(&vertex_list[vertex_idxs[0]]),
+        &vertex_list[vertex_idxs[2]].sub(&vertex_list[vertex_idxs[0]])
     ).len() * 0.5
 }
 
@@ -260,7 +260,7 @@ pub fn stl_to_bvh(file_name:&str,max_depth:usize, center: Point, scale: f32) -> 
     let mut bounds: Vec<Bound> = vec![];
     let mut bvhq: VecDeque<Option<Bound>> = VecDeque::new();
     
-    bvhq.push_back(make_bound(&stl.tris, &(0..stl.tris.len()).collect(), &stl.vertecies, 0, 3, 0.0, false, 0));
+    bvhq.push_back(make_bound(&stl.tris, &(0..stl.tris.len()).collect(), &stl.vertices, 0, 3, 0.0, false, 0));
     
     let mut leaf_bounds:usize = 0;
     let mut leaf_tris:usize = 0;
@@ -295,7 +295,7 @@ pub fn stl_to_bvh(file_name:&str,max_depth:usize, center: Point, scale: f32) -> 
         let mut ran_gen = rand::thread_rng();
         // check tris per axis
         for axis in 0..3{
-            // 10 rand tri, 1 check of splix axis
+            // 10 rand tri, 1 check of split axis
             for tri_test in 0..11{
                 let pos = if tri_test == 0 {
                     // First check split axis
@@ -329,7 +329,7 @@ pub fn stl_to_bvh(file_name:&str,max_depth:usize, center: Point, scale: f32) -> 
         let b1 = make_bound(
             &stl.tris, 
             &bound.tris, 
-            &stl.vertecies, 
+            &stl.vertices, 
             cur_i, 
             best_div_axis, 
             best_div_pos,
@@ -339,7 +339,7 @@ pub fn stl_to_bvh(file_name:&str,max_depth:usize, center: Point, scale: f32) -> 
         let b2 = make_bound(
             &stl.tris, 
             &bound.tris, 
-            &stl.vertecies, 
+            &stl.vertices, 
             cur_i, 
             best_div_axis, 
             best_div_pos,
@@ -353,12 +353,12 @@ pub fn stl_to_bvh(file_name:&str,max_depth:usize, center: Point, scale: f32) -> 
                 
     println!("Leaf bounds: {}    Leaf Tris: {}",leaf_bounds,leaf_tris);
     println!("Created BVH with {} bounds \nAverage of {} tris per leaf bound", bounds.len(), (leaf_tris as f32 * 100.0/leaf_bounds as f32).round() * 0.01);
-    BVHMesh { bounds: bounds, vertecies: stl.vertecies, tris: stl.tris }
+    BVHMesh { bounds: bounds, vertices: stl.vertices, tris: stl.tris }
 }
 
 
 
-fn make_bound(tri_list:&Vec<Tri>,tri_indecies:&Vec<usize>,vertex_list:&Vec<Point>,parent_index:usize,div_axis:u8,div_pos:f32,left_side:bool,depth:usize) -> Option<Bound>{
+fn make_bound(tri_list:&Vec<Tri>,tri_indices:&Vec<usize>,vertex_list:&Vec<Point>,parent_index:usize,div_axis:u8,div_pos:f32,left_side:bool,depth:usize) -> Option<Bound>{
     let mut min_x: f32 = INFINITY;
     let mut min_y: f32 = INFINITY;
     let mut min_z: f32 = INFINITY;
@@ -368,7 +368,7 @@ fn make_bound(tri_list:&Vec<Tri>,tri_indecies:&Vec<usize>,vertex_list:&Vec<Point
     
     let mut new_tris:Vec<usize> = vec![];
     
-    for tri_i in tri_indecies{
+    for tri_i in tri_indices{
         let tri: &Tri = &tri_list[*tri_i];
         // checks if the center of the tri is in the bound
         let is_in_bounds: bool = 
@@ -393,7 +393,7 @@ fn make_bound(tri_list:&Vec<Tri>,tri_indecies:&Vec<usize>,vertex_list:&Vec<Point
         
         
         new_tris.push(*tri_i);
-        for point_i in tri.vertecies{
+        for point_i in tri.vertices{
             let point = &vertex_list[point_i];
             
             if point.x < min_x {min_x = point.x}

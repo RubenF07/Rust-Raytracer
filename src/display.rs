@@ -1,5 +1,5 @@
 use crate::RGB;
-use crate::renderer::{render, RedererParams};
+use crate::renderer::{render, RendererParams};
 use std::fs::File;
 use std::num::NonZero;
 use std::rc::Rc;
@@ -24,7 +24,7 @@ struct App {
     height: u32,
     width: u32,
     current_window_size: (u32, u32),
-    renderer_params: Option<Arc<RedererParams>>,
+    renderer_params: Option<Arc<RendererParams>>,
     surface: Option<Surface<Rc<Window>,Rc<Window>>>,
 
     render_sender: Option<mpsc::Sender<Vec<u8>>>,
@@ -34,7 +34,7 @@ struct App {
 }
 
 impl App {
-    fn new(render_params: RedererParams, max_frame_count:u32) -> Self {
+    fn new(render_params: RendererParams, max_frame_count:u32) -> Self {
         let (render_sender, render_receiver) = mpsc::channel();
 
         let width = render_params.scene.camera.width;
@@ -65,13 +65,13 @@ impl App {
         let window_aspect = window_width as f32 / window_height as f32;
         
         let (scaled_width, scaled_height, offset_x, offset_y) = if window_aspect > source_aspect {
-            // Wider than source - vertical letterboxing
+            // Wider than source - vertical letter boxing
             let scaled_height = window_height;
             let scaled_width = (window_height as f32 * source_aspect) as u32;
             let offset_x = (window_width - scaled_width) / 2;
             (scaled_width, scaled_height, offset_x, 0)
         } else {
-            // Taller than source - horizontal letterboxing
+            // Taller than source - horizontal letter boxing
             let scaled_width = window_width;
             let scaled_height = (window_width as f32 / source_aspect) as u32;
             let offset_y = (window_height - scaled_height) / 2;
@@ -110,7 +110,7 @@ impl App {
                 }
             }
             
-            let scalled_buffer: Vec<u8> = if (self.frame_count>0){
+            let scaled_buffer: Vec<u8> = if (self.frame_count>0){
                 buffer.iter().map(|x| (x/self.frame_count) as u8).collect()
             }
             else{
@@ -119,7 +119,7 @@ impl App {
                 
 
             // Convert RGB buffer to RGBA pixels (u32)
-            let source_pixels: Vec<u32> = scalled_buffer.chunks_exact(3)
+            let source_pixels: Vec<u32> = scaled_buffer.chunks_exact(3)
                 .map(|rgb| {
                     let r = rgb[0] as u32;
                     let g = rgb[1] as u32;
@@ -231,12 +231,12 @@ impl ApplicationHandler for App {
     }
 }
 
-fn getframe(reder_params: &RedererParams) -> Vec<u8>{
-    render(reder_params)
+fn getframe(render_params: &RendererParams) -> Vec<u8>{
+    render(render_params)
 }
 
 
-pub fn start_render(render_params: RedererParams, max_frame_count:u32) {
+pub fn start_render(render_params: RendererParams, max_frame_count:u32) {
     let event_loop = EventLoop::new().unwrap();
     
     // Use Poll for smoother animation
